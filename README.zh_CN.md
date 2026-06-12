@@ -101,3 +101,10 @@ Termora 采用双重许可方式，您可以选择：
 
 - **AGPL-3.0**：自由使用、修改、分发（遵循 [AGPL 条款](https://opensource.org/license/agpl-v3)）
 - **专有许可**：如需闭源或商业用途，请联系作者获取授权  
+
+
+
+# 第一次运行或清理构建
+rm -rf build/jlink build/jpackage
+./gradlew jar copy-dependencies jlink jpackage dist
+rm -rf /Users/renxiang/IdeaProjects/termora/build/jpackage/image/Termora.app

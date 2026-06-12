@@ -92,6 +92,7 @@ class SettingsOptionsPane : OptionsPane() {
         options.add(TerminalOption())
         options.add(KeyShortcutsOption())
         options.add(SFTPOption())
+        options.add(DataManagementOption())
         options.add(AboutOption())
 
         for (extension in extensions) {

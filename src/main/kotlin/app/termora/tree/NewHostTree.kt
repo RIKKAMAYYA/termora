@@ -17,6 +17,7 @@ import app.termora.protocol.TransferProtocolProvider
 import app.termora.tag.TagDialog
 import app.termora.tag.TagManager
 import app.termora.tag.TagSimpleTreeCellRendererExtension
+import app.termora.ssh.SSHConfigImporter
 import app.termora.transfer.TransferActionEvent
 import com.formdev.flatlaf.extras.components.FlatPopupMenu
 import kotlinx.serialization.Serializable
@@ -42,6 +43,7 @@ import java.awt.datatransfer.Transferable
 import java.awt.datatransfer.UnsupportedFlavorException
 import java.awt.event.*
 import java.io.*
+import java.nio.file.Files
 import java.util.*
 import javax.swing.*
 import javax.swing.event.PopupMenuEvent
@@ -808,24 +810,52 @@ class NewHostTree : SimpleTree(), Disposable {
     }
 
     private fun parseFromSSH(folder: HostTreeNode): List<HostTreeNode> {
-        val entries = HostConfigEntry.readHostConfigEntries(HostConfigEntry.getDefaultHostConfigFile())
-
-        val sw = StringWriter()
-        CSVPrinter(sw, CSVFormat.EXCEL.builder().setHeader(*CSV_HEADERS).get()).use { printer ->
-            for (entry in entries) {
-                printer.printRecord(
-                    StringUtils.EMPTY,
-                    StringUtils.defaultString(entry.host),
-                    SSHProtocolProvider.PROTOCOL,
-                    StringUtils.defaultString(entry.hostName),
-                    if (entry.port == 0) 22 else entry.port,
-                    StringUtils.defaultString(entry.username),
-                    StringUtils.EMPTY,
-                )
-            }
+        if (!Files.isRegularFile(HostConfigEntry.getDefaultHostConfigFile())) {
+            OptionPane.showMessageDialog(
+                owner,
+                I18n.getString("termora.welcome.contextmenu.import.ssh-config-not-found"),
+                messageType = JOptionPane.WARNING_MESSAGE
+            )
+            return emptyList()
         }
 
-        return parseFromCSV(folder, StringReader(sw.toString()))
+        val importer = SSHConfigImporter.create()
+        val result = try {
+            importer.parseSSHConfig(folder)
+        } catch (e: Exception) {
+            if (log.isErrorEnabled) {
+                log.error("SSH config import failed", e)
+            }
+            OptionPane.showMessageDialog(
+                owner,
+                ExceptionUtils.getMessage(e),
+                I18n.getString("termora.welcome.contextmenu.import.error"),
+                JOptionPane.ERROR_MESSAGE
+            )
+            return emptyList()
+        }
+
+        val stats = result.stats
+        val message = buildString {
+            appendLine(I18n.getString("termora.welcome.contextmenu.import.complete"))
+            appendLine()
+            appendLine("Keys imported: ${stats.keysImported}, reused: ${stats.keysReused}, skipped (invalid): ${stats.keysSkippedInvalid}")
+            appendLine("Hosts created: ${stats.hostsCreated}, updated: ${stats.hostsUpdated}")
+            if (stats.missingKeyRefs > 0) {
+                appendLine("Missing key references: ${stats.missingKeyRefs}")
+            }
+            if (stats.missingJumpRefs > 0) {
+                appendLine("Missing jump host references: ${stats.missingJumpRefs}")
+            }
+        }
+        OptionPane.showMessageDialog(
+            owner,
+            message,
+            I18n.getString("termora.welcome.contextmenu.import.ssh-summary"),
+            JOptionPane.INFORMATION_MESSAGE
+        )
+
+        return result.nodes
     }
 
     private fun parseFromSecureCRT(folder: HostTreeNode, file: File): List<HostTreeNode> {

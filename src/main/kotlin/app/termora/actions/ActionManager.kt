@@ -8,6 +8,7 @@ import app.termora.keymgr.KeyManagerAction
 import app.termora.macro.MacroAction
 import app.termora.snippet.SnippetAction
 import app.termora.tlog.TerminalLoggerAction
+import app.termora.tunnel.TunnelAction
 import app.termora.transfer.TransferAnAction
 import javax.swing.Action
 
@@ -33,6 +34,7 @@ class ActionManager : org.jdesktop.swingx.action.ActionManager() {
         addAction(Actions.KEYWORD_HIGHLIGHT, KeywordHighlightAction())
         addAction(Actions.TERMINAL_LOGGER, TerminalLoggerAction.getInstance())
         addAction(Actions.SFTP, TransferAnAction())
+        addAction(Actions.TUNNEL_MANAGER, TunnelAction.getInstance())
         addAction(SFTPCommandAction.SFTP_COMMAND, SFTPCommandAction())
         addAction(MultipleAction.MULTIPLE, MultipleAction.getInstance())
         addAction(SnippetAction.SNIPPET, SnippetAction.getInstance())

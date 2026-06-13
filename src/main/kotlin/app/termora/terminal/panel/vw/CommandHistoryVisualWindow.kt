@@ -32,6 +32,24 @@ internal open class CommandHistoryVisualWindow(
 
     companion object {
         private val log = LoggerFactory.getLogger(CommandHistoryVisualWindow::class.java)
+        private const val HISTORY_LIMIT = 200
+        private const val REMOTE_HISTORY_TYPE_PREFIX = "__TERMORA_HISTORY_TYPE__:"
+
+        internal fun parseRemoteHistory(output: String): List<String> {
+            val outputLines = output.lines()
+            val headerIndex = outputLines.indexOfFirst { it.trim().startsWith(REMOTE_HISTORY_TYPE_PREFIX) }
+            if (headerIndex < 0) {
+                return BashParser.parse(outputLines.iterator())
+            }
+
+            val historyType = outputLines[headerIndex].trim().removePrefix(REMOTE_HISTORY_TYPE_PREFIX).trim()
+            val historyLines = outputLines.drop(headerIndex + 1)
+            return when (historyType) {
+                "zsh" -> ZshParser.parse(historyLines.iterator())
+                "fish" -> FishParser.parse(historyLines.iterator())
+                else -> BashParser.parse(historyLines.iterator())
+            }
+        }
     }
 
     private val commandHistoryPanel by lazy { SystemInformationPanel() }
@@ -164,11 +182,11 @@ internal open class CommandHistoryVisualWindow(
                     lines.addAll(BashParser.parse(text.lines().iterator()))
                 }
             } else if (tab is SSHTerminalTab) {
-                val session = tab.getData(SSHTerminalTab.SSHSession)
-                if (session != null) {
-                    val pair = SshClients.execChannel(session, "tail -n 100 ~/.bash_history")
-                    if (pair.first == 0) {
-                        lines.addAll(BashParser.parse(pair.second.lines().iterator()))
+                lines.addAll(LocalCommandHistoryManager.read(tab.host, HISTORY_LIMIT))
+                if (lines.isEmpty()) {
+                    val session = tab.getData(SSHTerminalTab.SSHSession)
+                    if (session != null) {
+                        lines.addAll(readRemoteHistory(session))
                     }
                 }
             }
@@ -203,17 +221,64 @@ internal open class CommandHistoryVisualWindow(
         }
 
         private fun readHistoryFile(file: File): ByteArray {
-            val process = Runtime.getRuntime().exec(arrayOf("tail", "-n", "100", file.absolutePath))
+            val process = Runtime.getRuntime().exec(arrayOf("tail", "-n", HISTORY_LIMIT.toString(), file.absolutePath))
             if (process.waitFor() == 0) {
                 return process.inputStream.use { it.readAllBytes() }
             }
             return byteArrayOf()
         }
 
+        private fun readRemoteHistory(session: org.apache.sshd.client.session.ClientSession): List<String> {
+            val pair = SshClients.execChannel(session, createRemoteHistoryCommand())
+            if (pair.first != 0) {
+                if (log.isDebugEnabled) {
+                    log.debug("Failed to read remote command history, exit code: {}", pair.first)
+                }
+                return emptyList()
+            }
+            return CommandHistoryVisualWindow.parseRemoteHistory(pair.second)
+        }
+
+        private fun createRemoteHistoryCommand(): String {
+            val dollar = '$'
+            val script = """
+                histfile=""
+                if [ -n "${dollar}{HISTFILE:-}" ] && [ -r "${dollar}HISTFILE" ]; then
+                    histfile="${dollar}HISTFILE"
+                elif [ -r "${dollar}HOME/.zsh_history" ]; then
+                    histfile="${dollar}HOME/.zsh_history"
+                elif [ -r "${dollar}HOME/.bash_history" ]; then
+                    histfile="${dollar}HOME/.bash_history"
+                elif [ -n "${dollar}{XDG_DATA_HOME:-}" ] && [ -r "${dollar}XDG_DATA_HOME/fish/fish_history" ]; then
+                    histfile="${dollar}XDG_DATA_HOME/fish/fish_history"
+                elif [ -r "${dollar}HOME/.local/share/fish/fish_history" ]; then
+                    histfile="${dollar}HOME/.local/share/fish/fish_history"
+                elif [ -r "${dollar}HOME/.history" ]; then
+                    histfile="${dollar}HOME/.history"
+                else
+                    exit 1
+                fi
+                shell_name="${dollar}{SHELL##*/}"
+                case "${dollar}histfile:${dollar}shell_name" in
+                    *fish_history*) history_type="fish" ;;
+                    *.zsh_history:*|*:zsh) history_type="zsh" ;;
+                    *.bash_history:*|*:bash) history_type="bash" ;;
+                    *) history_type="bash" ;;
+                esac
+                printf "$REMOTE_HISTORY_TYPE_PREFIX%s\n" "${dollar}history_type"
+                tail -n $HISTORY_LIMIT "${dollar}histfile"
+            """.trimIndent()
+            return "sh -c ${shellQuote(script)}"
+        }
+
+        private fun shellQuote(text: String): String {
+            return "'" + text.replace("'", "'\"'\"'") + "'"
+        }
+
 
     }
 
-    protected object Parser {
+    internal object Parser {
         fun parse(iterator: Iterator<String>, lineCallback: (String) -> String): List<String> {
             val lines = mutableListOf<String>()
             val sb = StringBuilder()
@@ -233,20 +298,66 @@ internal open class CommandHistoryVisualWindow(
         }
     }
 
-    protected object ZshParser {
+    internal object ZshParser {
+        private val extendedHistoryRegex = Regex("^: \\d+:\\d+;(.*)$")
+
         fun parse(iterator: Iterator<String>): List<String> {
-            return Parser.parse(iterator) { it.split(";".toRegex(), 2).last() }.reversed()
+            return Parser.parse(iterator) { line ->
+                extendedHistoryRegex.matchEntire(line)?.groupValues?.get(1) ?: line
+            }.reversed()
         }
     }
 
-    protected object BashParser {
+    internal object BashParser {
         fun parse(iterator: Iterator<String>): List<String> {
             return Parser.parse(iterator) { it }.reversed()
         }
     }
 
+    internal object FishParser {
+        fun parse(iterator: Iterator<String>): List<String> {
+            val lines = mutableListOf<String>()
+            while (iterator.hasNext()) {
+                val line = iterator.next()
+                if (line.startsWith("- cmd: ")) {
+                    val command = unescapeCommand(line.removePrefix("- cmd: "))
+                    if (command.isNotBlank()) {
+                        lines.add(command)
+                    }
+                }
+            }
+            return lines.reversed()
+        }
+
+        private fun unescapeCommand(command: String): String {
+            val sb = StringBuilder(command.length)
+            var escaped = false
+            for (c in command) {
+                if (escaped) {
+                    sb.append(
+                        when (c) {
+                            'n' -> '\n'
+                            't' -> '\t'
+                            '\\' -> '\\'
+                            else -> c
+                        }
+                    )
+                    escaped = false
+                } else if (c == '\\') {
+                    escaped = true
+                } else {
+                    sb.append(c)
+                }
+            }
+            if (escaped) {
+                sb.append('\\')
+            }
+            return sb.toString()
+        }
+    }
+
     // https://www.zsh.org/mla/users/2011/msg00154.html
-    protected object ZshHistoryCodec {
+    internal object ZshHistoryCodec {
         private const val META = 0x83
         private const val META_MASK = 0x20
 

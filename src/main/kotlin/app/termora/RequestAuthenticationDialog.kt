@@ -5,6 +5,7 @@ import app.termora.keymgr.OhKeyPair
 import com.formdev.flatlaf.extras.components.FlatComboBox
 import com.jgoodies.forms.builder.FormBuilder
 import com.jgoodies.forms.layout.FormLayout
+import org.apache.commons.lang3.StringUtils
 import java.awt.BorderLayout
 import java.awt.Component
 import java.awt.Dimension
@@ -13,7 +14,11 @@ import java.awt.event.ItemEvent
 import javax.swing.*
 import kotlin.math.max
 
-class RequestAuthenticationDialog(owner: Window, host: Host) : DialogWrapper(owner) {
+class RequestAuthenticationDialog(
+    owner: Window,
+    host: Host,
+    displayName: String = host.name,
+) : DialogWrapper(owner) {
 
     private val authenticationTypeComboBox = FlatComboBox<AuthenticationType>()
     private val rememberCheckBox = JCheckBox(I18n.getString("termora.new-host.general.remember"))
@@ -22,11 +27,16 @@ class RequestAuthenticationDialog(owner: Window, host: Host) : DialogWrapper(own
     private val usernameTextField = OutlineTextField()
     private val publicKeyComboBox = OutlineComboBox<OhKeyPair>()
     private val keyManager get() = KeyManager.getInstance()
+    private val displayName = StringUtils.defaultIfBlank(displayName, host.name)
     private var authentication = Authentication.No
 
     init {
         isModal = true
-        title = "SSH User Authentication"
+        title = if (this.displayName.isBlank()) {
+            "SSH User Authentication"
+        } else {
+            "${this.displayName} - SSH User Authentication"
+        }
         controlsVisible = false
 
         init()
@@ -81,19 +91,21 @@ class RequestAuthenticationDialog(owner: Window, host: Host) : DialogWrapper(own
         val formMargin = "7dlu"
         val layout = FormLayout(
             "left:pref, $formMargin, default:grow",
-            "pref, $formMargin, pref, $formMargin, pref"
+            "pref, $formMargin, pref, $formMargin, pref, $formMargin, pref"
         )
 
         switchPasswordComponent()
 
         return FormBuilder.create().padding("1dlu, $formMargin, $formMargin, $formMargin")
             .layout(layout)
-            .add("${I18n.getString("termora.new-host.general.authentication")}:").xy(1, 1)
-            .add(authenticationTypeComboBox).xy(3, 1)
-            .add("${I18n.getString("termora.new-host.general.username")}:").xy(1, 3)
-            .add(usernameTextField).xy(3, 3)
-            .add("${I18n.getString("termora.new-host.general.password")}:").xy(1, 5)
-            .add(passwordPanel).xy(3, 5)
+            .add("${I18n.getString("termora.new-host.general.host")}:").xy(1, 1)
+            .add(displayName).xy(3, 1)
+            .add("${I18n.getString("termora.new-host.general.authentication")}:").xy(1, 3)
+            .add(authenticationTypeComboBox).xy(3, 3)
+            .add("${I18n.getString("termora.new-host.general.username")}:").xy(1, 5)
+            .add(usernameTextField).xy(3, 5)
+            .add("${I18n.getString("termora.new-host.general.password")}:").xy(1, 7)
+            .add(passwordPanel).xy(3, 7)
             .build()
     }
 

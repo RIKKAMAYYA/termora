@@ -278,7 +278,8 @@ object SshClients {
         } catch (e: Exception) {
             if (e !is SshException || e.disconnectCode != org.apache.sshd.common.SshConstants.SSH2_DISCONNECT_NO_MORE_AUTH_METHODS_AVAILABLE) throw e
             val owner = client.properties["owner"] as Window? ?: throw e
-            val askUserInfo = ask(host, entry, owner) ?: throw e
+            val displayName = client.properties["displayName"] as? String ?: host.name
+            val askUserInfo = ask(host, entry, owner, displayName) ?: throw e
             if (askUserInfo.authentication.type == AuthenticationType.No) throw e
             return doOpenSession(
                 host.copy(
@@ -330,11 +331,17 @@ object SshClients {
     }
 
     fun openClient(host: Host, owner: Window): SshClient {
+        return openClient(host, owner, host.name)
+    }
+
+    fun openClient(host: Host, owner: Window, displayName: String): SshClient {
         val h = hostManager.getHost(host.id) ?: host
         val client = openClient(h)
-        client.userInteraction = TerminalUserInteraction(owner)
-        client.serverKeyVerifier = DialogServerKeyVerifier(owner)
+        val title = StringUtils.defaultIfBlank(displayName, h.name)
+        client.userInteraction = TerminalUserInteraction(owner, title)
+        client.serverKeyVerifier = DialogServerKeyVerifier(owner, title)
         client.properties["owner"] = owner
+        client.properties["displayName"] = title
         return client
     }
 
@@ -440,11 +447,11 @@ object SshClients {
 
     private data class AskUserInfo(val username: String, val authentication: Authentication)
 
-    private fun ask(host: Host, entry: HostConfigEntry, owner: Window): AskUserInfo? {
+    private fun ask(host: Host, entry: HostConfigEntry, owner: Window, displayName: String): AskUserInfo? {
         val ref = AtomicReference<AskUserInfo>(null)
 
         SwingUtilities.invokeAndWait {
-            val dialog = RequestAuthenticationDialog(owner, host)
+            val dialog = RequestAuthenticationDialog(owner, host, displayName)
             dialog.setLocationRelativeTo(owner)
             val authentication = dialog.getAuthentication()
             ref.set(AskUserInfo(dialog.getUsername(), authentication))
@@ -467,7 +474,14 @@ object SshClients {
         return ref.get()
     }
 
-    private class MyDialogServerKeyVerifier(private val owner: Window) : ServerKeyVerifier, ModifiedServerKeyAcceptor {
+    private fun titleWithDisplayName(title: String, displayName: String): String {
+        return if (displayName.isBlank()) title else "$displayName - $title"
+    }
+
+    private class MyDialogServerKeyVerifier(
+        private val owner: Window,
+        private val displayName: String,
+    ) : ServerKeyVerifier, ModifiedServerKeyAcceptor {
         override fun verifyServerKey(
             clientSession: ClientSession,
             remoteAddress: SocketAddress,
@@ -542,7 +556,7 @@ object SshClients {
             return OptionPane.showConfirmDialog(
                 owner,
                 panel,
-                "SSH Security Warning",
+                titleWithDisplayName("SSH Security Warning", displayName),
                 messageType = JOptionPane.WARNING_MESSAGE,
                 optionType = JOptionPane.OK_CANCEL_OPTION
             )
@@ -552,8 +566,9 @@ object SshClients {
 
     private class DialogServerKeyVerifier(
         owner: Window,
+        displayName: String,
     ) : KnownHostsServerKeyVerifier(
-        MyDialogServerKeyVerifier(owner),
+        MyDialogServerKeyVerifier(owner, displayName),
         Paths.get(Application.getBaseDataDir().absolutePath, "known_hosts")
     ) {
         init {

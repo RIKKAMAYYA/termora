@@ -14,6 +14,7 @@ data class Snippet(
     val id: String = randomUUID(),
     val name: String,
     val snippet: String = StringUtils.EMPTY,
+    val trigger: String = StringUtils.EMPTY,
     val parentId: String = StringUtils.EMPTY,
     val type: SnippetType = SnippetType.Snippet,
     val deleted: Boolean = false,

@@ -105,6 +105,11 @@ Termora 采用双重许可方式，您可以选择：
 
 
 # 第一次运行或清理构建
-rm -rf build/jlink build/jpackage
+当然，之后在项目根目录执行：
+cd /Users/renxiang/IdeaProjects/termora
 ./gradlew jar copy-dependencies jlink jpackage dist
-rm -rf /Users/renxiang/IdeaProjects/termora/build/jpackage/image/Termora.app
+如果你想从干净状态重新打包，用：
+./gradlew clean jar copy-dependencies jlink jpackage dist
+打包完成后产物在：
+/Users/renxiang/IdeaProjects/termora/build/distributions/
+你这台 Mac 上一般会生成 .dmg 和 .zip。Gradle 里那些 restricted method / deprecated warning 目前可以先忽略，只要最后是 BUILD SUCCESSFUL 就行。e/Termora.app

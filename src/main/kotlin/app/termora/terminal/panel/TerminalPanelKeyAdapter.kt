@@ -4,9 +4,12 @@ import app.termora.actions.TerminalCopyAction
 import app.termora.keymap.KeyShortcut
 import app.termora.keymap.KeymapManager
 import app.termora.plugin.internal.AltKeyModifier
+import app.termora.snippet.SnippetSuggestionState
+import app.termora.snippet.SnippetTriggerManager
 import app.termora.terminal.ControlCharacters
 import app.termora.terminal.DataKey
 import app.termora.terminal.Terminal
+import app.termora.terminal.TerminalKeyEvent
 import com.formdev.flatlaf.util.SystemInfo
 import org.slf4j.LoggerFactory
 import java.awt.event.InputEvent
@@ -27,6 +30,7 @@ class TerminalPanelKeyAdapter(
 
     private val activeKeymap get() = KeymapManager.getInstance().getActiveKeymap()
     private var isIgnoreKeyTyped = false
+    private val snippetInput = StringBuilder()
 
     override fun keyTyped(e: KeyEvent) {
         // 如果忽略并且不是正常字符
@@ -36,6 +40,7 @@ class TerminalPanelKeyAdapter(
 
         terminal.getSelectionModel().clearSelection()
         writer.write(TerminalWriter.WriteRequest.fromBytes("${e.keyChar}".toByteArray(writer.getCharset())))
+        updateSnippetSuggestion(e.keyChar.toString())
         terminal.getScrollingModel().scrollTo(Int.MAX_VALUE)
 
     }
@@ -69,6 +74,12 @@ class TerminalPanelKeyAdapter(
         // remove all toast
         if (e.keyCode == KeyEvent.VK_ESCAPE) {
             terminalPanel.hideToast()
+            clearSnippetSuggestion()
+        }
+
+        if (e.keyCode == KeyEvent.VK_TAB && acceptSnippetSuggestion()) {
+            e.consume()
+            return
         }
 
         val keyStroke = KeyStroke.getKeyStrokeForEvent(e)
@@ -83,6 +94,7 @@ class TerminalPanelKeyAdapter(
         val encode = terminal.getKeyEncoder().encode(AWTTerminalKeyEvent(e))
         if (encode.isNotEmpty()) {
             writer.write(TerminalWriter.WriteRequest.fromBytes(encode.toByteArray(writer.getCharset())))
+            updateSnippetSuggestion(encode)
             // scroll to bottom
             terminal.getScrollingModel().scrollTo(Int.MAX_VALUE)
             e.consume()
@@ -99,6 +111,7 @@ class TerminalPanelKeyAdapter(
         if (isAltPressedOnly(e) && Character.isDefined(e.keyChar) && modifier == AltKeyModifier.CharactersPrecededByESC) {
             val c = String(charArrayOf(ASCII_ESC, simpleMapKeyCodeToChar(e)))
             writer.write(TerminalWriter.WriteRequest.fromBytes(c.toByteArray(writer.getCharset())))
+            clearSnippetSuggestion()
             // scroll to bottom
             terminal.getScrollingModel().scrollTo(Int.MAX_VALUE)
             e.consume()
@@ -118,6 +131,7 @@ class TerminalPanelKeyAdapter(
             // 如果不为空表示已经发送过了，所以这里为空的时候再发送
             if (encode.isEmpty()) {
                 writer.write(TerminalWriter.WriteRequest.fromBytes("$keyChar".toByteArray(writer.getCharset())))
+                updateSnippetSuggestion("$keyChar")
                 e.consume()
             }
             terminal.getScrollingModel().scrollTo(Int.MAX_VALUE)
@@ -161,6 +175,63 @@ class TerminalPanelKeyAdapter(
         // zsh requires proper case of letter
         if (e.isShiftDown) return Character.toUpperCase(e.keyCode.toChar())
         return Character.toLowerCase(e.keyCode.toChar())
+    }
+
+    private fun acceptSnippetSuggestion(): Boolean {
+        val match = terminal.getTerminalModel().getData(DataKey.SnippetSuggestion, SnippetSuggestionState.None).match
+            ?: return false
+        val command = SnippetTriggerManager.getInstance().command(match)
+        if (command.isBlank()) {
+            clearSnippetSuggestion()
+            return false
+        }
+
+        val backspace = terminal.getKeyEncoder().encode(TerminalKeyEvent(KeyEvent.VK_BACK_SPACE))
+            .ifEmpty { "${ControlCharacters.BS}" }
+        val replacement = backspace.repeat(match.typed.length) + command
+        writer.write(TerminalWriter.WriteRequest.fromBytes(replacement.toByteArray(writer.getCharset())))
+        snippetInput.clear().append(command)
+        clearSnippetSuggestion()
+        terminal.getSelectionModel().clearSelection()
+        terminal.getScrollingModel().scrollTo(Int.MAX_VALUE)
+        return true
+    }
+
+    private fun updateSnippetSuggestion(text: String) {
+        for (c in text) {
+            when (c) {
+                ControlCharacters.CR, ControlCharacters.LF -> snippetInput.clear()
+                ControlCharacters.BS, 0x7F.toChar() -> {
+                    if (snippetInput.isNotEmpty()) {
+                        snippetInput.deleteAt(snippetInput.length - 1)
+                    } else {
+                        snippetInput.clear()
+                    }
+                }
+                ControlCharacters.TAB -> snippetInput.clear()
+                ControlCharacters.ESC -> {
+                    clearSnippetSuggestion()
+                    snippetInput.clear()
+                    return
+                }
+                else -> {
+                    if (Character.isISOControl(c)) {
+                        snippetInput.clear()
+                    } else {
+                        snippetInput.append(c)
+                    }
+                }
+            }
+        }
+
+        val match = SnippetTriggerManager.getInstance().find(snippetInput.toString())
+        terminal.getTerminalModel().setData(DataKey.SnippetSuggestion, SnippetSuggestionState(match))
+        terminalPanel.repaintImmediate()
+    }
+
+    private fun clearSnippetSuggestion() {
+        terminal.getTerminalModel().setData(DataKey.SnippetSuggestion, SnippetSuggestionState.None)
+        terminalPanel.repaintImmediate()
     }
 
 }

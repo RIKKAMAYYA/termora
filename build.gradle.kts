@@ -203,8 +203,10 @@ tasks.test {
 
 @Suppress("CascadeIf")
 tasks.register<Copy>("copy-dependencies") {
-    val dir = layout.buildDirectory.dir("libs")
-    from(configurations.runtimeClasspath).into(dir)
+    val dir = layout.buildDirectory.dir("jpackage-input")
+    from(configurations.runtimeClasspath)
+    from(tasks.jar)
+    into(dir)
     val jna = libs.jna.asProvider().get()
     val pty4j = libs.pty4j.get()
     val flatlaf = libs.flatlaf.get()
@@ -338,6 +340,7 @@ tasks.register<Copy>("copy-dependencies") {
 }
 
 tasks.register<Exec>("jlink") {
+    val runtimeImageDir = layout.buildDirectory.dir("jlink")
     val modules = listOf(
         "java.base",
         "java.desktop",
@@ -363,13 +366,18 @@ tasks.register<Exec>("jlink") {
         "--add-modules",
         modules.joinToString(","),
         "--output",
-        "${layout.buildDirectory.get()}/jlink"
+        runtimeImageDir.get().asFile.absolutePath
     )
+
+    doFirst {
+        FileUtils.deleteDirectory(runtimeImageDir.get().asFile)
+    }
 }
 
 tasks.register<Exec>("jpackage") {
 
     val buildDir = layout.buildDirectory.get()
+    val tempDir = layout.buildDirectory.dir("jpackage")
     val options = mutableListOf(
         "-Xmx2048m",
         "-XX:+HeapDumpOnOutOfMemoryError",
@@ -406,7 +414,7 @@ tasks.register<Exec>("jpackage") {
     arguments.addAll(listOf("--app-version", appVersion))
     arguments.addAll(listOf("--main-jar", tasks.jar.get().archiveFileName.get()))
     arguments.addAll(listOf("--main-class", application.mainClass.get()))
-    arguments.addAll(listOf("--input", "$buildDir/libs"))
+    arguments.addAll(listOf("--input", "$buildDir/jpackage-input"))
     arguments.addAll(listOf("--temp", "$buildDir/jpackage"))
     arguments.addAll(listOf("--dest", "$buildDir/distributions"))
     arguments.addAll(listOf("--java-options", options.joinToString(StringUtils.SPACE)))
@@ -452,6 +460,10 @@ tasks.register<Exec>("jpackage") {
     }
 
     commandLine(arguments)
+
+    doFirst {
+        FileUtils.deleteDirectory(tempDir.get().asFile)
+    }
 
 }
 

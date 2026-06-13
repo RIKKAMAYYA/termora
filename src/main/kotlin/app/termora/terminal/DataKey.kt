@@ -1,6 +1,7 @@
 package app.termora.terminal
 
 import app.termora.plugin.internal.AltKeyModifier
+import app.termora.snippet.SnippetSuggestionState
 import kotlin.reflect.KClass
 
 
@@ -195,10 +196,13 @@ class DataKey<T : Any>(val clazz: KClass<T>) {
         val TerminalWriter = DataKey(app.termora.terminal.panel.TerminalWriter::class)
 
         /**
+         * Inline snippet completion.
+         */
+        val SnippetSuggestion = DataKey(SnippetSuggestionState::class)
+
+        /**
          * [app.termora.plugin.internal.AltKeyModifier]
          */
         val AltModifier = DataKey(AltKeyModifier::class)
     }
 }
-
-

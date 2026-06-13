@@ -3,6 +3,7 @@ package app.termora.terminal.panel
 import app.termora.DynamicColor
 import app.termora.assertEventDispatchThread
 import app.termora.database.DatabaseManager
+import app.termora.snippet.SnippetSuggestionState
 import app.termora.swingCoroutineScope
 import app.termora.terminal.*
 import com.formdev.flatlaf.util.SystemInfo
@@ -111,6 +112,9 @@ class TerminalDisplay(
     }
 
     private fun drawAfter(g: Graphics) {
+        if (g is Graphics2D) {
+            drawSnippetSuggestion(g)
+        }
         terminalPanel.getListeners(TerminalPaintListener::class.java)
             .forEach {
                 it.after(
@@ -122,6 +126,39 @@ class TerminalDisplay(
                     terminal
                 )
             }
+    }
+
+    private fun drawSnippetSuggestion(g: Graphics2D) {
+        val match = terminal.getTerminalModel().getData(DataKey.SnippetSuggestion, SnippetSuggestionState.None).match
+            ?: return
+        if (match.completion.isBlank()) return
+
+        val lineHeight = getLineHeight()
+        val averageCharWidth = getAverageCharWidth()
+        val verticalScrollOffset = terminal.getScrollingModel().getVerticalScrollOffset()
+        val maxVerticalScrollOffset = terminal.getScrollingModel().getMaxVerticalScrollOffset()
+        val position = terminal.getCursorModel().getPosition()
+        val row = position.y + (maxVerticalScrollOffset - verticalScrollOffset)
+        if (row < 1 || row > terminal.getTerminalModel().getRows()) return
+
+        val x = (position.x - 1) * averageCharWidth
+        val y = row * lineHeight - getFontMetrics().descent
+        val availableChars = max(0, (width - x) / averageCharWidth)
+        if (availableChars < 1) return
+
+        val text = if (match.completion.length > availableChars) {
+            match.completion.take(max(1, availableChars - 1)) + "…"
+        } else {
+            match.completion
+        }
+
+        val oldFont = g.font
+        val oldColor = g.color
+        g.font = getDisplayFont(text, TextStyle.Default)
+        g.color = UIManager.getColor("textInactiveText") ?: Color.GRAY
+        g.drawString(text, x, y)
+        g.font = oldFont
+        g.color = oldColor
     }
 
     private fun drawBaseline(g: Graphics) {

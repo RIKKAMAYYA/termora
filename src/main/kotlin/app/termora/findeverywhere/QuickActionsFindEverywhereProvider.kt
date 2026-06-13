@@ -11,6 +11,7 @@ import org.jdesktop.swingx.action.ActionManager
 
 class QuickActionsFindEverywhereProvider(private val windowScope: WindowScope) : FindEverywhereProvider {
     private val actions = listOf(
+        Actions.TUNNEL_MANAGER,
         Actions.KEY_MANAGER,
         Actions.KEYWORD_HIGHLIGHT,
         MultipleAction.MULTIPLE,

@@ -32,6 +32,7 @@ internal class TermoraToolbarModel private constructor() {
         return listOf(
             ToolBarAction(SnippetAction.SNIPPET, true),
             ToolBarAction(Actions.SFTP, true),
+            ToolBarAction(Actions.TUNNEL_MANAGER, true),
             ToolBarAction(Actions.TERMINAL_LOGGER, true),
             ToolBarAction(Actions.MACRO, true),
             ToolBarAction(Actions.KEYWORD_HIGHLIGHT, true),

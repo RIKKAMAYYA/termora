@@ -28,4 +28,9 @@ object Actions {
      */
     const val SFTP = "SFTPAction"
 
+    /**
+     * 独立隧道管理器
+     */
+    const val TUNNEL_MANAGER = "TunnelManagerAction"
+
 }

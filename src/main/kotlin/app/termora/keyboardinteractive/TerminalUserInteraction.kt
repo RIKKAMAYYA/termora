@@ -7,7 +7,8 @@ import java.awt.Window
 import javax.swing.SwingUtilities
 
 class TerminalUserInteraction(
-    private val owner: Window
+    private val owner: Window,
+    private val displayName: String = StringUtils.EMPTY,
 ) : UserInteraction {
 
 
@@ -29,8 +30,8 @@ class TerminalUserInteraction(
                     true
                 )
                 dialog.setLocationRelativeTo(owner)
-                dialog.title = instruction ?: name ?: "OTP"
-                dialog.title = StringUtils.defaultIfBlank(dialog.title, "OTP")
+                val title = StringUtils.defaultIfBlank(instruction ?: name, "OTP")
+                dialog.title = if (displayName.isBlank()) title else "$displayName - $title"
                 passwords[i] = dialog.getText()
                 if (passwords[i].isBlank()) {
                     break

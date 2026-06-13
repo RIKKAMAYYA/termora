@@ -10,6 +10,7 @@ import app.termora.terminal.Terminal
 import app.termora.terminal.panel.TerminalHyperlinkPaintListener
 import app.termora.terminal.panel.TerminalPanel
 import app.termora.terminal.panel.TerminalWriter
+import app.termora.plugin.internal.ssh.SSHTerminalTab
 import kotlinx.coroutines.*
 import org.apache.commons.lang3.StringUtils
 import org.slf4j.LoggerFactory
@@ -39,7 +40,7 @@ class TerminalPanelFactory : Disposable {
 
 
     fun createTerminalPanel(tab: TerminalTab?, terminal: Terminal, ptyConnector: PtyConnector): TerminalPanel {
-        val writer = MyTerminalWriter(ptyConnector)
+        val writer = MyTerminalWriter(ptyConnector, tab)
         val terminalPanel = TerminalPanel(tab, terminal, writer)
 
         // processDeviceStatusReport
@@ -110,12 +111,16 @@ class TerminalPanelFactory : Disposable {
         }
     }
 
-    private class MyTerminalWriter(private val ptyConnector: PtyConnector) : TerminalWriter {
+    private class MyTerminalWriter(
+        private val ptyConnector: PtyConnector,
+        tab: TerminalTab?,
+    ) : TerminalWriter {
         companion object {
             private val log = LoggerFactory.getLogger(MyTerminalWriter::class.java)
         }
 
         private lateinit var evt: AnActionEvent
+        private val commandHistoryRecorder = (tab as? SSHTerminalTab)?.let { LocalCommandHistoryRecorder(it.host) }
 
         override fun onMounted(c: JComponent) {
             evt = AnActionEvent(c, StringUtils.EMPTY, EventObject(c))
@@ -129,29 +134,34 @@ class TerminalPanelFactory : Disposable {
 
             val windowScope = evt.getData(DataProviders.WindowScope)
             if (windowScope == null) {
-                ptyConnector.write(request.buffer)
+                writeToConnector(request)
                 return
             }
 
             val multipleAction = MultipleAction.getInstance()
             if (multipleAction.isSelected(windowScope).not()) {
-                ptyConnector.write(request.buffer)
+                writeToConnector(request)
                 return
             }
 
             val terminalTabbedManager = evt.getData(DataProviders.TerminalTabbedManager)
             if (terminalTabbedManager == null) {
-                ptyConnector.write(request.buffer)
+                writeToConnector(request)
                 return
             }
 
             for (tab in terminalTabbedManager.getTerminalTabs()) {
                 val writer = tab.getData(DataProviders.TerminalWriter) ?: continue
                 if (writer is MyTerminalWriter) {
-                    writer.ptyConnector.write(request.buffer)
+                    writer.writeToConnector(request)
                 }
             }
 
+        }
+
+        private fun writeToConnector(request: TerminalWriter.WriteRequest) {
+            commandHistoryRecorder?.accept(request.buffer, getCharset())
+            ptyConnector.write(request.buffer)
         }
 
         override fun resize(rows: Int, cols: Int) {

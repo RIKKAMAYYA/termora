@@ -3,9 +3,12 @@ package app.termora.snippet
 import app.termora.Disposable
 import app.termora.DocumentAdaptor
 import app.termora.DynamicColor
+import app.termora.I18n
+import app.termora.OutlineTextField
 import app.termora.database.DatabaseManager
 import app.termora.tree.TreeUtils
 import com.formdev.flatlaf.extras.components.FlatTextArea
+import com.formdev.flatlaf.extras.components.FlatTextField
 import com.formdev.flatlaf.ui.FlatRoundBorder
 import com.formdev.flatlaf.util.SystemInfo
 import com.jgoodies.forms.builder.FormBuilder
@@ -85,7 +88,7 @@ class SnippetPanel : JPanel(BorderLayout()), Disposable {
                 cardLayout.show(rightPanel, "Banner")
             } else {
                 cardLayout.show(rightPanel, "Editor")
-                editor.textArea.text = lastNode.data.snippet
+                editor.load(lastNode.data)
                 editor.resetUndo()
             }
         }
@@ -119,7 +122,10 @@ class SnippetPanel : JPanel(BorderLayout()), Disposable {
 
     private inner class SnippetEditor : JPanel(BorderLayout()) {
         val textArea = FlatTextArea()
+        private val triggerTextField = OutlineTextField(64)
+        private val pathTriggerTextField = FlatTextField()
         private var undoManager = UndoManager()
+        private var updating = false
 
         init {
             initViews()
@@ -130,6 +136,7 @@ class SnippetPanel : JPanel(BorderLayout()), Disposable {
             val panel = JPanel(BorderLayout())
             panel.add(JScrollPane(textArea).apply { border = BorderFactory.createEmptyBorder() }, BorderLayout.CENTER)
             panel.border = FlatRoundBorder()
+            add(createMetadataPanel(), BorderLayout.NORTH)
             add(panel, BorderLayout.CENTER)
             add(createTip(), BorderLayout.SOUTH)
 
@@ -147,6 +154,26 @@ class SnippetPanel : JPanel(BorderLayout()), Disposable {
 
         private fun initEvents() {
             textArea.document.addUndoableEditListener(undoManager)
+
+            triggerTextField.document.addDocumentListener(object : DocumentAdaptor() {
+                override fun changedUpdate(e: DocumentEvent) {
+                    if (updating) return
+                    val lastNode = lastNode ?: return
+                    val trigger = triggerTextField.text.trim()
+                    val manager = SnippetTriggerManager.getInstance()
+                    if (trigger.isNotBlank() && manager.normalizeTrigger(trigger) == null) {
+                        triggerTextField.outline = "error"
+                        return
+                    }
+                    if (!manager.isTriggerAvailable(trigger, lastNode.data.id)) {
+                        triggerTextField.outline = "error"
+                        return
+                    }
+                    triggerTextField.outline = null
+                    lastNode.data = lastNode.data.copy(trigger = trigger, updateDate = System.currentTimeMillis())
+                    snippetManager.addSnippet(lastNode.data)
+                }
+            })
 
             textArea.addKeyListener(object : KeyAdapter() {
                 override fun keyPressed(e: KeyEvent) {
@@ -172,6 +199,7 @@ class SnippetPanel : JPanel(BorderLayout()), Disposable {
 
             textArea.document.addDocumentListener(object : DocumentAdaptor() {
                 override fun changedUpdate(e: DocumentEvent) {
+                    if (updating) return
                     val lastNode = lastNode ?: return
                     lastNode.data = lastNode.data.copy(snippet = textArea.text, updateDate = System.currentTimeMillis())
                     snippetManager.addSnippet(lastNode.data)
@@ -183,6 +211,43 @@ class SnippetPanel : JPanel(BorderLayout()), Disposable {
             textArea.document.removeUndoableEditListener(undoManager)
             undoManager = UndoManager()
             textArea.document.addUndoableEditListener(undoManager)
+        }
+
+        fun load(snippet: Snippet) {
+            updating = true
+            try {
+                triggerTextField.text = snippet.trigger
+                triggerTextField.outline = null
+                pathTriggerTextField.text = SnippetTriggerManager.getInstance().pathTrigger(snippet)
+                textArea.text = snippet.snippet
+            } finally {
+                updating = false
+            }
+        }
+
+        private fun createMetadataPanel(): JPanel {
+            pathTriggerTextField.isEditable = false
+            pathTriggerTextField.isFocusable = false
+            pathTriggerTextField.placeholderText = "folder.name"
+            triggerTextField.placeholderText = "grepw"
+
+            val label = JLabel(I18n.getString("termora.snippet.trigger"))
+            val pathLabel = JLabel(I18n.getString("termora.snippet.path-trigger"))
+
+            val formMargin = "4dlu"
+            return FormBuilder.create().debug(false)
+                .layout(
+                    FormLayout(
+                        "left:pref, $formMargin, default:grow, $formMargin, left:pref, $formMargin, default:grow",
+                        "pref"
+                    )
+                )
+                .add(label).xy(1, 1)
+                .add(triggerTextField).xy(3, 1)
+                .add(pathLabel).xy(5, 1)
+                .add(pathTriggerTextField).xy(7, 1)
+                .padding("0, 0, ${formMargin}, 0")
+                .build()
         }
 
         private fun createTip(): JPanel {

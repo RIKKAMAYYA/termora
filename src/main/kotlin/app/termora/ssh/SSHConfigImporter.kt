@@ -287,20 +287,20 @@ class SSHConfigImporter private constructor(
             }
 
             val material = "${loaded.publicKey}\n${loaded.privateKey}"
-            var existing = existingByMaterial[material]
-            if (existing == null) existing = existingByName[loaded.name]
+            val existing = existingByMaterial[material]
 
             if (existing != null) {
                 keyIdByPath[path.toString()] = existing.id
                 stats.keysReused++
             } else {
+                val name = createUniqueKeyName(path, loaded.name, existingByName)
                 val id = randomUUID()
                 val keyPair = OhKeyPair(
                     id = id,
                     publicKey = loaded.publicKey,
                     privateKey = loaded.privateKey,
                     type = loaded.type,
-                    name = loaded.name,
+                    name = name,
                     remark = "",
                     length = loaded.length,
                     sort = System.currentTimeMillis(),
@@ -308,7 +308,7 @@ class SSHConfigImporter private constructor(
                 )
                 keyManager.addOhKeyPair(keyPair, owner)
                 existingByMaterial[material] = keyPair
-                existingByName[loaded.name] = keyPair
+                existingByName[name] = keyPair
                 keyIdByPath[path.toString()] = id
                 stats.keysImported++
             }
@@ -325,6 +325,19 @@ class SSHConfigImporter private constructor(
         val type: String,
         val length: Int,
     )
+
+    private fun createUniqueKeyName(path: Path, fallbackName: String, existingByName: Map<String, OhKeyPair>): String {
+        val parentName = path.parent?.fileName?.toString().orEmpty()
+        val preferredName = if (parentName.isBlank()) fallbackName else "$parentName/${path.name}"
+        if (!existingByName.containsKey(preferredName)) return preferredName
+
+        var index = 2
+        while (true) {
+            val name = "$preferredName ($index)"
+            if (!existingByName.containsKey(name)) return name
+            index++
+        }
+    }
 
     /**
      * Load a private key file using Apache SSHD's key loading facilities.
@@ -350,10 +363,10 @@ class SSHConfigImporter private constructor(
                             resource: NamedResource,
                             index: Int,
                             password: String,
-                            err: Exception
+                            err: Exception?
                         ): ResourceDecodeResult {
                             // Skip encrypted keys
-                            return ResourceDecodeResult.IGNORE
+                            return if (err == null) ResourceDecodeResult.TERMINATE else ResourceDecodeResult.IGNORE
                         }
                     }
                 )

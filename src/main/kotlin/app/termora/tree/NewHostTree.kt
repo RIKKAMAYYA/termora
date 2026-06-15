@@ -19,6 +19,8 @@ import app.termora.tag.TagManager
 import app.termora.tag.TagSimpleTreeCellRendererExtension
 import app.termora.ssh.SSHConfigImporter
 import app.termora.transfer.TransferActionEvent
+import app.termora.xshell.XshellConfigImporter
+import com.formdev.flatlaf.extras.components.FlatPasswordField
 import com.formdev.flatlaf.extras.components.FlatPopupMenu
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.*
@@ -37,6 +39,7 @@ import org.jdesktop.swingx.action.ActionManager
 import org.slf4j.LoggerFactory
 import org.w3c.dom.Element
 import org.w3c.dom.NodeList
+import java.awt.BorderLayout
 import java.awt.datatransfer.DataFlavor
 import java.awt.datatransfer.StringSelection
 import java.awt.datatransfer.Transferable
@@ -644,8 +647,9 @@ class NewHostTree : SimpleTree(), Disposable {
                 FileNameExtensionFilter("MobaXterm (*.mobaconf,*.ini)", "ini", "mobaconf")
 
             ImportType.Xshell -> {
-                chooser.fileSelectionMode = JFileChooser.DIRECTORIES_ONLY
-                chooser.dialogTitle = "Xshell Sessions"
+                chooser.fileSelectionMode = JFileChooser.FILES_AND_DIRECTORIES
+                chooser.dialogTitle = "Xshell Sessions / Backup"
+                chooser.fileFilter = FileNameExtensionFilter("Xshell (*.xts, *.xsh, Sessions folder)", "xts", "xsh")
                 chooser.isAcceptAllFileFilterUsed = true
             }
 
@@ -981,9 +985,26 @@ class NewHostTree : SimpleTree(), Disposable {
         return parseFromCSV(folder, StringReader(sw.toString()))
     }
 
-    private fun parseFromXshell(folder: HostTreeNode, dir: File): List<HostTreeNode> {
-        val files = FileUtils.listFiles(dir, arrayOf("xsh"), true)
-        if (files.isEmpty()) {
+    private fun parseFromXshell(folder: HostTreeNode, file: File): List<HostTreeNode> {
+        val passwordField = FlatPasswordField()
+        val panel = JPanel(BorderLayout(0, 6))
+        panel.add(
+            JLabel("Xshell master password (optional):"),
+            BorderLayout.NORTH
+        )
+        panel.add(passwordField, BorderLayout.CENTER)
+        val result = JOptionPane.showConfirmDialog(
+            owner,
+            panel,
+            "Xshell",
+            JOptionPane.OK_CANCEL_OPTION,
+            JOptionPane.PLAIN_MESSAGE
+        )
+        if (result != JOptionPane.OK_OPTION) return emptyList()
+
+        val importResult = XshellConfigImporter(passwordField.password).parse(file, folder)
+        val stats = importResult.stats
+        if (stats.sessionsFound == 0) {
             OptionPane.showMessageDialog(
                 owner,
                 I18n.getString("termora.welcome.contextmenu.import.xshell-folder-empty")
@@ -991,30 +1012,36 @@ class NewHostTree : SimpleTree(), Disposable {
             return emptyList()
         }
 
-        val sw = StringWriter()
-        CSVPrinter(sw, CSVFormat.EXCEL.builder().setHeader(*CSV_HEADERS).get()).use { printer ->
-            for (file in files) {
-                val ini = Ini(file)
-                val protocol = ini.get("CONNECTION", "Protocol") ?: SSHProtocolProvider.PROTOCOL
-                if (!StringUtils.equalsIgnoreCase(SSHProtocolProvider.PROTOCOL, protocol)) continue
-                val folders = FilenameUtils.separatorsToUnix(file.parentFile.relativeTo(dir).toString())
-                val hostname = ini.get("CONNECTION", "Host") ?: StringUtils.EMPTY
-                val label = file.nameWithoutExtension
-                val port = ini.get("CONNECTION", "Port")?.toIntOrNull() ?: 22
-                val username = ini.get("CONNECTION:AUTHENTICATION", "UserName") ?: StringUtils.EMPTY
-                printer.printRecord(
-                    folders,
-                    label,
-                    SSHProtocolProvider.PROTOCOL,
-                    hostname,
-                    port,
-                    username,
-                    StringUtils.EMPTY
-                )
+        val message = buildString {
+            appendLine(I18n.getString("termora.welcome.contextmenu.import.complete"))
+            appendLine()
+            appendLine("Sessions found: ${stats.sessionsFound}")
+            appendLine("Hosts imported: ${stats.hostsImported}")
+            appendLine("Folders created: ${stats.foldersCreated}")
+            appendLine("Passwords decrypted: ${stats.passwordsDecrypted}/${stats.passwordsFound}")
+            appendLine("Password authentications imported: ${stats.passwordAuthenticationsImported}")
+            if (stats.keyAuthenticationsSkipped > 0) {
+                appendLine("Key authentications skipped: ${stats.keyAuthenticationsSkipped}")
+            }
+            if (stats.passwordsFailed > 0) {
+                appendLine("Passwords failed: ${stats.passwordsFailed}")
+            }
+            if (stats.passwordsSkipped > 0) {
+                appendLine("Passwords skipped: ${stats.passwordsSkipped}")
+            }
+            if (stats.proxiesApplied > 0 || stats.proxiesMissing > 0) {
+                appendLine("Proxies applied: ${stats.proxiesApplied}, missing: ${stats.proxiesMissing}")
+            }
+            if (stats.tunnelsImported > 0) {
+                appendLine("Tunnels imported: ${stats.tunnelsImported}")
+            }
+            if (stats.jumpHostsResolved > 0 || stats.jumpHostsMissing > 0) {
+                appendLine("Jump hosts resolved: ${stats.jumpHostsResolved}, missing: ${stats.jumpHostsMissing}")
             }
         }
+        OptionPane.showMessageDialog(owner, message, title = "Xshell")
 
-        return parseFromCSV(folder, StringReader(sw.toString()))
+        return importResult.nodes
     }
 
     private fun parseFromFinalShell(folder: HostTreeNode, dir: File): List<HostTreeNode> {

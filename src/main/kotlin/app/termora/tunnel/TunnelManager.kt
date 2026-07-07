@@ -382,9 +382,21 @@ class TunnelManager private constructor() : Disposable {
 
     private suspend fun monitorConnectedEntry(entry: TunnelEntry, manual: Boolean) {
         waitUntilClosed(entry)
-        if (!entry.autoReconnect || entry.stopRequested || manual) {
+
+        // If autoReconnect is disabled or stop was requested, mark as Stopped
+        if (!entry.autoReconnect || entry.stopRequested) {
             if (entry.tracker == null && entry.state != TunnelState.Failed) {
                 entry.state = TunnelState.Stopped
+                notifyChanged()
+            }
+            return
+        }
+
+        // If manual start and autoReconnect is enabled, ensure state is Reconnecting
+        // This is critical for the loop in runEntry to continue attempting reconnection
+        if (manual && entry.autoReconnect && entry.tracker == null) {
+            if (entry.state != TunnelState.Reconnecting) {
+                entry.state = TunnelState.Reconnecting
                 notifyChanged()
             }
         }
